@@ -55,6 +55,7 @@ export const RevisionFields = styled.div`
 
 const RevisionField = styled.div`
   padding: 8px;
+  word-break: break-all;
 `
 
 export const RevisionArticle = styled(RevisionField)``
