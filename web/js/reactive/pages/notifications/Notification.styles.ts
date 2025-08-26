@@ -51,6 +51,9 @@ export const RevisionFields = styled.div`
   border-radius: 4px;
   display: grid;
   grid-template-columns: 1fr max-content max-content max-content;
+  @media (max-width: ${MOBILE_SIZE}px) {
+    grid-template-columns: 1fr max-content max-content 1fr;
+  }
 `
 
 const RevisionField = styled.div`
