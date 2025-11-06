@@ -1,12 +1,12 @@
-@import url('./fonts/font-bauhaus.css');
-@import url('./fonts/new-fonts.css');
+@charset "utf-8";
+@import 'fonts/font-bauhaus.css';
+@import 'fonts/new-fonts.css';
 @import url('https://fonts.googleapis.com/earlyaccess/nanumgothic.css');
 @import url('https://fonts.googleapis.com/earlyaccess/nanumgothiccoding.css');
 @import url('https://maxcdn.bootstrapcdn.com/font-awesome/4.3.0/css/font-awesome.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Open+Sans+Condensed:wght@700&display=swap');
-@import url('side-bar-redesign.css');
+@import 'side-bar-redesign.css';
 
-@charset "utf-8";
 
 div.class1 > div {
     font-family: 'Open Sans Condensed', sans-serif !important;
@@ -723,11 +723,6 @@ sup {
     right: 0;
 }
  
-/* IE7 HACK */
-#top-bar ul > li > ul {
-    *margin-top: -4px;
-}
- 
 /* SIDE MENU */
 #side-bar {
     clear: none;
@@ -1398,18 +1393,6 @@ div.curved {
     zoom: 1;
 }
  
-/* chrome viewport - maybe it isn't work... */
-@-webkit-viewport {
-    width: device-width;
-    zoom: 1;
-}
- 
-/* firefox viewport - maybe it isn't work too... */
-@-moz-viewport {
-    width: device-width;
-    zoom: 1;
-}
- 
 /* webkit scrollbar */
 ::-webkit-scrollbar {
     width: 9px; /* for vertical scrollbars */
@@ -2046,42 +2029,4 @@ div#u-adult-warning > .error-block {
 /* Page preview component -- https://scp-wiki.wikidot.com/component:preview */
 div.preview {
     display: none;
-}
-
-/* User rate on forum post */
-.thread-container .post .long .head .vote {
-	flex-grow: 1;
-    text-align: right;
-	color: #666
-}
-
-.thread-container .post .long .head .rate {
-	font-weight: bold;
-}
-
-.thread-container .post .long .head .rate::before {
-	font-family: "Font Awesome 5 Free";
-    content: "\f005 ";
-    letter-spacing: 2px;
-    color: #666;
-}
-/* ======================= */
-
-/* New forum triks */
-.thread-container .post .long .head.op-post {
-    background: #e4f0c8;
-}
-/* =============== */
-
-.printuser .badge {
-    background: gray;
-    padding: 0px 2px 0px 2px;
-    border-radius: 3px;
-    color: white;
-    font-weight: 500;
-    font-size: .75em;
-    height: 1.5em;
-    display: inline-flex;
-    align-items: center;
-    vertical-align: text-top;
 }

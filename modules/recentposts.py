@@ -10,7 +10,7 @@ import math
 import renderer
 
 from renderer.utils import render_vote_to_html
-from web.controllers import articles, permissions
+from web.controllers import articles
 from web.models.articles import Vote
 from web.models.forum import ForumCategory, ForumSection, ForumPost
 
@@ -31,7 +31,7 @@ def get_post_info(context, posts, category_for_comments):
         is_op = thread.author == post.author
 
         if thread.article:
-            rating_mode = thread.article.get_settings().rating_mode
+            rating_mode = thread.article.settings.rating_mode
             author_vote = Vote.objects.filter(user=post.author, article=thread.article).last()
             author_vote = render_vote_to_html(author_vote, rating_mode)
             if thread.article.author == post.author:
@@ -73,7 +73,7 @@ def get_post_info(context, posts, category_for_comments):
 def render(context: RenderContext, params):
     context.title = 'Последние сообщения форума'
 
-    all_categories = [x for x in ForumCategory.objects.order_by('order', 'id') if permissions.check(context.user, 'view', x)]
+    all_categories = [x for x in ForumCategory.objects.order_by('order', 'id') if context.user.has_perm('roles.view_forum_categories', x)]
 
     category_param = '*'
 
@@ -138,7 +138,7 @@ def render(context: RenderContext, params):
     raw_categories = all_categories
     raw_sections = ForumSection.objects.all().order_by('order', 'id')
     for s in raw_sections:
-        if not permissions.check(context.user, 'view', s):
+        if not context.user.has_perm('roles.view_forum_sections', s):
             continue
         cs = []
         for c in raw_categories:
