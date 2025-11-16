@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Optional, Union, Sequence, Tuple, Dict
 
 from django.conf import settings
-from django.contrib.auth.models import AbstractUser as _UserType
+from django.contrib.auth.models import AbstractUser as _UserType, AnonymousUser
 from django.db import transaction
-from django.db.models import QuerySet, Sum, Avg, Count, Max, TextField, Value, IntegerField, Q, F
-from django.db.models.functions import Coalesce, Concat, Lower
+from django.db.models import QuerySet, Sum, Avg, Count, Max, IntegerField, Q, F
+from django.db.models.functions import Coalesce
 
 import renderer
 from web.events import EventBase
@@ -19,6 +19,7 @@ from web.controllers import notifications, media
 from web.models.articles import Article, ArticleLogEntry, ArticleVersion, Category, ExternalLink, Tag, TagsCategory, Vote
 from web.models.files import File
 from web.models.settings import Settings
+from web.models.site import get_current_site
 from web.models.users import User
 from web.models.forum import ForumThread, ForumPost
 from web.models.roles import Role
@@ -28,6 +29,7 @@ from web.util import lock_table
 _FullNameOrArticle = Optional[Union[str, Article]]
 _FullNameOrCategory = Optional[Union[str, Category]]
 _FullNameOrTag = Optional[Union[str, Tag]]
+_UserIdOrUser = Optional[Union[int, User]]
 
 
 class AbstractArticleEvent(EventBase, is_abstract=True):
@@ -154,9 +156,9 @@ def create_article(full_name: str, user: Optional[_UserType] = None) -> Article:
         name=name,
         created_at=datetime.datetime.now(),
         title=name,
-        author=user
     )
     article.save()
+    article.authors.add(user)
     OnCreateArticle(user, article).emit()
     return article
 
@@ -268,6 +270,25 @@ def revert_article_version(full_name_or_article: _FullNameOrArticle, rev_number:
             pass
         elif entry.type == ArticleLogEntry.LogEntryType.VotesDeleted:
             new_props['votes'] = entry.meta
+        elif entry.type == ArticleLogEntry.LogEntryType.Authorship:
+            if 'added_authors' not in new_props:
+                new_props['added_authors'] = []
+            if 'removed_authors' not in new_props:
+                new_props['removed_authors'] = []
+            # logic: authors that were removed are now added
+            #        authors that were added are now removed
+            for author in entry.meta['added_authors']:
+                try:
+                    new_props['added_authors'].remove(author)
+                except ValueError:
+                    pass
+                new_props['removed_authors'].append(author)
+            for author in entry.meta['removed_authors']:
+                try:
+                    new_props['removed_authors'].remove(author)
+                except ValueError:
+                    pass
+                new_props['added_authors'].append(author)
         elif entry.type == ArticleLogEntry.LogEntryType.Revert:
             if 'source' in entry.meta:
                 new_props['source'] = get_previous_version(entry.meta['source']['version_id']).source
@@ -313,6 +334,25 @@ def revert_article_version(full_name_or_article: _FullNameOrArticle, rev_number:
                     new_props['files_renamed'][f['id']] = f['prev_name']
             if 'votes' in entry.meta:
                 new_props['votes'] = entry.meta['votes']
+            if 'authorship' in entry.meta:
+                if 'added_authors' not in new_props:
+                    new_props['added_authors'] = []
+                if 'removed_authors' not in new_props:
+                    new_props['removed_authors'] = []
+                # logic: authors that were removed are now added
+                #        authors that were added are now removed
+                for author in entry.meta['authorship']['added']:
+                    try:
+                        new_props['added_authors'].remove(author)
+                    except ValueError:
+                        pass
+                    new_props['removed_authors'].append(author)
+                for author in entry.meta['authorship']['removed']:
+                    try:
+                        new_props['removed_authors'].remove(author)
+                    except ValueError:
+                        pass
+                    new_props['added_authors'].append(author)
 
     subtypes = []
 
@@ -456,6 +496,29 @@ def revert_article_version(full_name_or_article: _FullNameOrArticle, rev_number:
                 new_vote.save()
                 new_vote.date = vote_date
                 new_vote.save()
+
+    authors_added_meta = []
+    authors_removed_meta = []
+
+    authors = [x.id for x in get_authors(article)]
+    for author in new_props.get('removed_authors', []):
+        try:
+            authors.remove(author)
+            authors_removed_meta.append(author)
+        except ValueError:
+            pass
+    for author in new_props.get('added_authors', []):
+        authors.append(author)
+        authors_added_meta.append(author)
+    new_authors = list(User.objects.filter(id__in=authors))
+    set_authors(article, new_authors, user)
+
+    if authors_added_meta or authors_removed_meta:
+        subtypes.append(ArticleLogEntry.LogEntryType.Authorship)
+        meta['authorship'] = {
+            'added': tags_added_meta,
+            'removed': tags_removed_meta
+        }
 
     meta['rev_number'] = rev_number
     meta['subtypes'] = subtypes
@@ -859,8 +922,9 @@ def get_comment_info(full_name_or_article: _FullNameOrArticle) -> tuple[int, int
         return 0, 0
     with transaction.atomic():
         thread, created = ForumThread.objects.get_or_create(article=article)
-    if created:
-        notifications.subscribe_to_notifications(subscriber=article.author, forum_thread=thread)
+        if created:
+            for author in article.authors.all():
+                notifications.subscribe_to_notifications(subscriber=author, forum_thread=thread)
     post_count = ForumPost.objects.filter(thread=thread).count()
     return thread.id, post_count
 
@@ -881,6 +945,62 @@ def get_rating(full_name_or_article: _FullNameOrArticle) -> tuple[int | float, i
         return 0, 0, 0, obj_settings.rating_mode
     else:
         raise ValueError('Unsupported rate type "%s"' % obj_settings.rating_mode)
+    
+
+# Returns dict {article_id: (rating, votes_count, popularity, mode)}
+def get_all_ratings(articles_qs):
+    category_names = list(
+        articles_qs.values_list("category", flat=True).distinct()
+    )
+    categories_map = {
+        c.name: c for c in Category.objects.filter(name__in=category_names).select_related("_settings")
+    }
+
+    current_site = get_current_site()
+    site_settings = current_site.settings
+    default_settings = Settings.get_default_settings()
+
+    vote_stats = (
+        Vote.objects
+        .values("article_id")
+        .annotate(
+            sum_rate=Coalesce(Sum("rate"), 0.0),
+            count_rate=Count("rate"),
+            good_updown=Count("rate", filter=Q(rate=1)),
+            avg_rate=Coalesce(Avg("rate"), 0.0),
+            good_stars=Count("rate", filter=Q(rate__gte=3))
+        )
+    )
+    votes_map = {v["article_id"]: v for v in vote_stats}
+
+    results = {}
+    for article in articles_qs:
+        cat = categories_map.get(article.category)
+        category_settings = getattr(cat, "_settings", None)
+        merged_settings = default_settings.merge(site_settings).merge(category_settings)
+
+        rating_mode = merged_settings.rating_mode
+        votes = votes_map.get(article.id, {})
+
+        if rating_mode == Settings.RatingMode.UpDown:
+            rating_value = votes.get("sum_rate", 0)
+            votes_count = votes.get("count_rate", 0)
+            popularity = round((votes.get("good_updown", 0) / (votes_count or 1)) * 100)
+        elif rating_mode == Settings.RatingMode.Stars:
+            rating_value = round(votes.get("avg_rate", 0.0), 1)
+            votes_count = votes.get("count_rate", 0)
+            popularity = round((votes.get("good_stars", 0) / (votes_count or 1)) * 100)
+        else:
+            rating_value = votes_count = popularity = 0
+
+        results[article.id] = (
+            rating_value,
+            votes_count,
+            popularity,
+            rating_mode,
+        )
+
+    return results
 
 
 def get_formatted_rating(full_name_or_article: _FullNameOrArticle) -> str:
@@ -1077,3 +1197,46 @@ def fetch_articles_by_names(original_names):
         dumb_name = ('_default:%s' % name).lower() if ':' not in name else name.lower()
         articles_dict[name] = ret_map[dumb_name]
     return articles_dict
+
+
+# Get hidden categories for specific user (none -> AnonymousUser)
+def get_hidden_categories_for(user: User) -> list[Category]:
+    if user is None:
+        user = AnonymousUser()
+    all_categories = Category.objects.all()
+    hidden_categories = []
+    for category in all_categories:
+        if not user.has_perm('roles.view_articles', category):
+            hidden_categories.append(category)
+    return hidden_categories
+
+
+def get_authors(full_name_or_article):
+    article = get_article(full_name_or_article)
+    return article.authors.all()
+
+
+# Set article lock status
+def set_authors(full_name_or_article: _FullNameOrArticle, authors: list[_UserIdOrUser], user: Optional[_UserType]):
+    if not authors:
+        return
+    
+    article = get_article(full_name_or_article)
+    authors = User.objects.filter(id__in=[author.id if isinstance(author, User) else author for author in authors])
+
+    if authors.count():
+        old_authors = set(article.authors.all())
+        article.authors.set(authors)
+        new_authors = set(authors)
+
+        added_authors = [author.id for author in (new_authors - old_authors)]
+        removed_authors = [author.id for author in (old_authors - new_authors)]
+
+        if added_authors or removed_authors:
+            log = ArticleLogEntry(
+                article=article,
+                user=user,
+                type=ArticleLogEntry.LogEntryType.Authorship,
+                meta={'added_authors': added_authors, 'removed_authors': removed_authors}
+            )
+            add_log_entry(article, log)

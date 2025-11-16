@@ -8,7 +8,7 @@ def is_perms_collection():
 class ViewArticlesPermission(BaseRolePermission):
     name = 'Просматривать статьи'
     codename = 'view_articles'
-    description = 'Позволяет просматривать статьи'
+    description = 'Позволяет просматривать статьи, их файлы, теги, обратные ссылки и родителей'
     group = 'Статьи'
 
 
@@ -56,7 +56,7 @@ class LockArticlesPermission(BaseRolePermission):
 
 class ManageArticleFilesPermission(BaseRolePermission):
     name = 'Редактировать файлы статей'
-    codename = 'manage_articles_files'
+    codename = 'manage_article_files'
     description = 'Позволяет загружать, переименовывать и удалять файлы статей'
     group = 'Статьи'
 
@@ -82,8 +82,14 @@ class CommentArticlesPermission(BaseRolePermission):
     group = 'Статьи'
 
 
-class ViewArticlesCommentsPermission(BaseRolePermission):
+class ViewArticleCommentsPermission(BaseRolePermission):
     name = 'Просматривать обсуждения статей'
-    codename = 'view_articles_comments'
+    codename = 'view_article_comments'
     description = 'Позволяет просматривать обсуждения статей'
+    group = 'Статьи'
+
+class ManageArticleAuthorsPermission(BaseRolePermission):
+    name = 'Управлять авторством статей'
+    codename = 'manage_article_authors'
+    description = 'Позволяет добавлять и удалять авторов статей'
     group = 'Статьи'
